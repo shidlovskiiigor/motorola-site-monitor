@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f14" />
+  <title>Motorola Site Monitor — Private</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    :root{
+      --bg:#0b0f14;--panel:#121820;--panel2:#171f29;--text:#f3f6f8;
+      --muted:#8e9aa8;--line:#26313d;--ok:#36d17f;--warn:#ffbf3f;
+      --bad:#ff5f62;--accent:#5ea8ff
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .wrap{width:min(980px,100%);margin:0 auto;padding:18px 14px 36px}
+    .top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px}
+    h1{font-size:24px;margin:0 0 5px;letter-spacing:-.4px}
+    .sub{font-size:13px;color:var(--muted)}
+    .badge{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 11px;font-size:13px;white-space:nowrap}
+    .dot{width:9px;height:9px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 3px rgba(255,191,63,.12)}
+    .dot.ok{background:var(--ok);box-shadow:0 0 0 3px rgba(54,209,127,.12)}
+    .dot.bad{background:var(--bad);box-shadow:0 0 0 3px rgba(255,95,98,.12)}
+    .hero{display:grid;grid-template-columns:1.25fr .75fr;gap:12px;margin-bottom:12px}
+    .card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:18px;padding:16px}
+    .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+    .big{font-size:44px;line-height:1;font-weight:760;letter-spacing:-1.7px}
+    .unit{font-size:19px;color:var(--muted);font-weight:600;margin-left:3px}
+    .mini{font-size:13px;color:var(--muted);margin-top:10px}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+    .value{font-size:25px;font-weight:700;letter-spacing:-.5px}
+    .smallunit{font-size:14px;color:var(--muted);font-weight:500}
+    .cells{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
+    .cell{background:#0e141b;border:1px solid var(--line);border-radius:13px;padding:12px}
+    .cell .cname{font-size:12px;color:var(--muted);margin-bottom:5px}
+    .cell .cval{font-size:22px;font-weight:700}
+    .row{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px}
+    .row:last-child{border-bottom:0}
+    .row span:first-child{color:var(--muted)}
+    .pill{padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;border:1px solid var(--line)}
+    .pill.ok{color:var(--ok)}.pill.bad{color:var(--bad)}.pill.warn{color:var(--warn)}
+    .footer{color:var(--muted);font-size:12px;text-align:center;margin-top:18px;line-height:1.5}
+
+    .overlay{position:fixed;inset:0;background:rgba(5,8,12,.92);display:flex;align-items:center;justify-content:center;padding:18px;z-index:50}
+    .login{width:min(430px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px}
+    .login h2{margin:0 0 6px;font-size:21px}
+    .login p{margin:0 0 17px;color:var(--muted);font-size:13px;line-height:1.5}
+    .field{margin:12px 0}
+    .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    .field input{width:100%;border:1px solid var(--line);background:#0d131a;color:var(--text);border-radius:11px;padding:12px 13px;font-size:15px;outline:none}
+    .field input:focus{border-color:var(--accent)}
+    .check{display:flex;gap:9px;align-items:center;color:var(--muted);font-size:13px;margin:12px 0 16px}
+    .btn{width:100%;border:0;border-radius:11px;padding:12px 14px;background:var(--accent);color:#07111d;font-weight:800;font-size:15px;cursor:pointer}
+    .btn.secondary{margin-top:8px;background:#202b37;color:var(--text)}
+    .err{margin-top:12px;color:var(--bad);font-size:13px;min-height:18px}
+    .hidden{display:none}
+
+    @media(max-width:700px){
+      .hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}.cells{grid-template-columns:1fr}.big{font-size:40px}
+    }
+  </style>
+</head>
+<body>
+
+<div id="loginOverlay" class="overlay">
+  <div class="login">
+    <h2>Приватний моніторинг</h2>
+    <p>Підключення до твого EMQX Cloud через WSS/TLS. Пароль не записаний у цьому HTML-файлі.</p>
+
+    <div class="field">
+      <label>MQTT username</label>
+      <input id="loginUser" value="site1_dashboard" autocomplete="username">
+    </div>
+
+    <div class="field">
+      <label>MQTT password</label>
+      <input id="loginPass" type="password" placeholder="Введи пароль site1_dashboard" autocomplete="current-password">
+    </div>
+
+    <label class="check">
+      <input id="remember" type="checkbox">
+      <span>Запам’ятати пароль на цьому пристрої</span>
+    </label>
+
+    <button id="connectBtn" class="btn">Підключитися</button>
+    <button id="clearBtn" class="btn secondary">Забути збережений пароль</button>
+    <div id="loginError" class="err"></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>Motorola Site Monitor</h1>
+      <div class="sub">Site 1 · JBD BMS · Private EMQX TLS</div>
+    </div>
+    <div class="badge">
+      <span id="siteDot" class="dot"></span>
+      <span id="siteState">Очікування даних</span>
+    </div>
+  </div>
+
+  <div class="hero">
+    <div class="card">
+      <div class="label">Напруга батареї</div>
+      <div><span id="bmsV" class="big">--.--</span><span class="unit">V</span></div>
+      <div class="mini">Останнє оновлення: <span id="updated">—</span></div>
+    </div>
+    <div class="card">
+      <div class="label">Температура BMS</div>
+      <div><span id="temp" class="big">--.-</span><span class="unit">°C</span></div>
+      <div class="mini">Wi‑Fi RSSI: <span id="rssi">—</span> dBm</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="label">Комірки</div>
+    <div class="cells">
+      <div class="cell"><div class="cname">CELL 1</div><div><span id="c1" class="cval">—</span> <span class="smallunit">V</span></div></div>
+      <div class="cell"><div class="cname">CELL 2</div><div><span id="c2" class="cval">—</span> <span class="smallunit">V</span></div></div>
+      <div class="cell"><div class="cname">CELL 3</div><div><span id="c3" class="cval">—</span> <span class="smallunit">V</span></div></div>
+    </div>
+    <div class="row"><span>Мінімальна комірка</span><strong><span id="cmin">—</span> V</strong></div>
+    <div class="row"><span>Максимальна комірка</span><strong><span id="cmax">—</span> V</strong></div>
+    <div class="row"><span>Розкид</span><strong><span id="delta">—</span> mV</strong></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">SOC BMS</div><div class="value"><span id="soc">—</span><span class="smallunit"> %</span></div><div class="mini">Інформаційно</div></div>
+    <div class="card"><div class="label">Залишок BMS</div><div class="value"><span id="remaining">—</span><span class="smallunit"> Ah</span></div></div>
+    <div class="card"><div class="label">Струм BMS</div><div class="value"><span id="current">—</span><span class="smallunit"> A</span></div></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Стан системи</div>
+    <div class="row"><span>Private MQTT</span><span id="mqttState" class="pill warn">OFFLINE</span></div>
+    <div class="row"><span>ESP / Site</span><span id="availability" class="pill warn">UNKNOWN</span></div>
+    <div class="row"><span>Charge MOS</span><span id="chargeMos" class="pill warn">—</span></div>
+    <div class="row"><span>Discharge MOS</span><span id="dischargeMos" class="pill warn">—</span></div>
+    <div class="row"><span>Balancing</span><span id="balancing" class="pill warn">—</span></div>
+    <div class="row"><span>Protection</span><span id="protection" class="pill warn">—</span></div>
+  </div>
+
+  <div class="footer">
+    EMQX Cloud Serverless · WSS/TLS :8084<br>
+    Topic: motorola-monitor-7f31/site1/#
+  </div>
+</div>
+
+<script>
+const BROKER = 'wss://j623cc84.ala.us-east-1.emqxsl.com:8084/mqtt';
+const STATUS_TOPIC = 'motorola-monitor-7f31/site1/status';
+const AVAIL_TOPIC  = 'motorola-monitor-7f31/site1/availability';
+
+let client = null;
+let lastDataAt = 0;
+let siteAvailability = 'unknown';
+
+const $ = id => document.getElementById(id);
+
+function setPill(id,text,state){
+  const el=$(id);
+  el.textContent=text;
+  el.className='pill '+state;
+}
+
+function setSiteBadge(state,text){
+  $('siteState').textContent=text;
+  $('siteDot').className='dot '+state;
+}
+
+function fmtMv(mv){
+  return Number(mv/1000).toFixed(3);
+}
+
+function renderData(d){
+  $('bmsV').textContent=Number(d.bms_v).toFixed(2);
+  $('temp').textContent=Number(d.temp_c).toFixed(1);
+  $('rssi').textContent=d.wifi_rssi;
+
+  $('c1').textContent=fmtMv(d.cell1_mv);
+  $('c2').textContent=fmtMv(d.cell2_mv);
+  $('c3').textContent=fmtMv(d.cell3_mv);
+  $('cmin').textContent=fmtMv(d.cell_min_mv);
+  $('cmax').textContent=fmtMv(d.cell_max_mv);
+  $('delta').textContent=d.delta_mv;
+
+  $('soc').textContent=d.soc;
+  $('remaining').textContent=Number(d.remaining_ah).toFixed(2);
+  $('current').textContent=Number(d.bms_a).toFixed(2);
+
+  setPill('chargeMos',d.charge_mos?'ON':'OFF',d.charge_mos?'ok':'bad');
+  setPill('dischargeMos',d.discharge_mos?'ON':'OFF',d.discharge_mos?'ok':'bad');
+  setPill('balancing',d.balancing?'ON':'OFF',d.balancing?'ok':'warn');
+
+  if(Number(d.protection)===0){
+    setPill('protection','OK','ok');
+  }else{
+    setPill('protection','ACTIVE: '+d.protection,'bad');
+  }
+
+  lastDataAt=Date.now();
+  $('updated').textContent=new Date().toLocaleTimeString('uk-UA');
+
+  if(siteAvailability!=='offline'){
+    setSiteBadge('ok','Онлайн');
+  }
+}
+
+function showLoginError(text){
+  $('loginError').textContent=text || '';
+}
+
+function closeExistingClient(){
+  if(client){
+    try{client.end(true);}catch(e){}
+    client=null;
+  }
+}
+
+function connectPrivateMQTT(username,password,remember){
+  closeExistingClient();
+  showLoginError('');
+  setPill('mqttState','CONNECTING','warn');
+
+  const clientId='site1-dashboard-'+Math.random().toString(16).slice(2,10);
+
+  client=mqtt.connect(BROKER,{
+    clientId,
+    username,
+    password,
+    clean:true,
+    connectTimeout:10000,
+    reconnectPeriod:3000,
+    keepalive:30
+  });
+
+  client.on('connect',()=>{
+    setPill('mqttState','CONNECTED','ok');
+
+    client.subscribe([STATUS_TOPIC,AVAIL_TOPIC],{qos:0},err=>{
+      if(err){
+        showLoginError('Підключення є, але broker не дозволив Subscribe. Перевір Authorization для site1_dashboard.');
+        return;
+      }
+
+      if(remember){
+        localStorage.setItem('motorola_mqtt_user',username);
+        localStorage.setItem('motorola_mqtt_pass',password);
+      }else{
+        localStorage.removeItem('motorola_mqtt_user');
+        localStorage.removeItem('motorola_mqtt_pass');
+      }
+
+      $('loginOverlay').classList.add('hidden');
+    });
+  });
+
+  client.on('reconnect',()=>setPill('mqttState','RECONNECTING','warn'));
+
+  client.on('offline',()=>{
+    setPill('mqttState','OFFLINE','bad');
+  });
+
+  client.on('error',err=>{
+    setPill('mqttState','ERROR','bad');
+    showLoginError('Не вдалося підключитися. Перевір username/password та Client Authentication.');
+  });
+
+  client.on('message',(topic,payload)=>{
+    const text=payload.toString();
+
+    if(topic===AVAIL_TOPIC){
+      siteAvailability=text.trim().toLowerCase();
+
+      if(siteAvailability==='online'){
+        setPill('availability','ONLINE','ok');
+        if(Date.now()-lastDataAt<30000){
+          setSiteBadge('ok','Онлайн');
+        }
+      }else{
+        setPill('availability','OFFLINE','bad');
+        setSiteBadge('bad','Офлайн');
+      }
+      return;
+    }
+
+    if(topic===STATUS_TOPIC){
+      try{
+        renderData(JSON.parse(text));
+      }catch(e){
+        console.error('Bad JSON',e);
+      }
+    }
+  });
+}
+
+$('connectBtn').addEventListener('click',()=>{
+  const username=$('loginUser').value.trim();
+  const password=$('loginPass').value;
+  const remember=$('remember').checked;
+
+  if(!username || !password){
+    showLoginError('Введи username і password.');
+    return;
+  }
+
+  connectPrivateMQTT(username,password,remember);
+});
+
+$('clearBtn').addEventListener('click',()=>{
+  localStorage.removeItem('motorola_mqtt_user');
+  localStorage.removeItem('motorola_mqtt_pass');
+  $('loginPass').value='';
+  $('remember').checked=false;
+  showLoginError('Збережений пароль видалено з цього браузера.');
+});
+
+$('loginPass').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    $('connectBtn').click();
+  }
+});
+
+window.addEventListener('load',()=>{
+  const user=localStorage.getItem('motorola_mqtt_user');
+  const pass=localStorage.getItem('motorola_mqtt_pass');
+
+  if(user){
+    $('loginUser').value=user;
+  }
+
+  if(pass){
+    $('loginPass').value=pass;
+    $('remember').checked=true;
+    connectPrivateMQTT(user || 'site1_dashboard',pass,true);
+  }
+});
+
+setInterval(()=>{
+  if(lastDataAt && Date.now()-lastDataAt>30000 && siteAvailability!=='offline'){
+    setSiteBadge('bad','Немає свіжих даних');
+  }
+},3000);
+</script>
+
+</body>
+</html>
