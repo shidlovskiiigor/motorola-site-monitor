@@ -4,7 +4,12 @@
            Partition Scheme: Default 4MB with spiffs — потрібна для OTA)
   Ядро:    esp32 by Espressif 3.x
   Бібліотеки: OneWireNg (дає сумісний OneWire.h), DallasTemperature (Miles Burton)
-  Версія:  1.3
+  Версія:  1.4
+
+  v1.4: аварія зберігається в NVS і переживає перезавантаження (скидання — reset);
+        CPU 80 МГц і пауза в loop у простої; датчик палива і температура в простої
+        раз на 60 с; насос зупиняється після 3 підтверджених вимірів; сторінка:
+        кнопки за станом, шкала палива, прогрес OTA, пауза оновлення у фоні.
 
   Зв'язок із SITE: UART1 9600 8N1, TX=GPIO6, RX=GPIO7, через ADUM1201 біля SITE.
   Протокол: текстові кадри  $<тіло>*<CRC>\n , CRC = XOR усіх символів тіла (2 hex).
@@ -26,7 +31,7 @@
 #include <Update.h>
 #include <stdarg.h>
 
-#define FW_VERSION "1.3"
+#define FW_VERSION "1.4"
 
 // ===================== ПІНИ =====================
 const int PIN_STOP    = 20;  // IN1 СТОП: HIGH = запалювання дозволене, LOW = заглушено
@@ -85,6 +90,17 @@ const uint32_t MANUAL_CRANK_MAX_MS = 3000;
 const float    MIN_START_V         = 10.5f;    // нижче — не крутимо стартер
 const float    OVERTEMP_C          = 60.0f;    // перегрів стартерного АКБ
 
+// опитування датчиків і економія
+const uint32_t CPU_MHZ             = 80;       // мінімум для Wi-Fi
+const uint32_t FUEL_ACTIVE_MS      = 1000;     // двигун працює / ручний режим / сторінка відкрита
+const uint32_t FUEL_PUMP_MS        = 200;      // насос качає
+const uint32_t FUEL_IDLE_MS        = 60000;    // простій
+const uint32_t TEMP_ACTIVE_MS      = 10000;
+const uint32_t TEMP_IDLE_MS        = 60000;
+const uint32_t TEMP_CONV_MS        = 250;      // 10 біт: конверсія 188 мс
+const int      PUMP_CONFIRM_N      = 3;        // стільки вимірів підряд, щоб зупинити насос
+const uint32_t LOOP_IDLE_DELAY_MS  = 10;       // у простої процесор спить між проходами loop
+
 // Налаштовувані через SET, зберігаються в NVS
 uint32_t cfgMaxRunMin    = 300;  // максимальна робота без work, хв
 uint32_t cfgWarmupS      = 60;   // прогрів до вмикання SSR, с
@@ -131,6 +147,8 @@ int      chokeFromUs = CHOKE_OPEN_US;
 int      pumpTarget = 0;         // 0 = насос не працює за завданням
 uint32_t pumpStartMs = 0, pumpStepMs = 0;
 int      pumpLastStep = 0;
+uint32_t pumpSeenSeq = 0;
+int      pumpFullCnt = 0, pumpOpenCnt = 0;
 const char* pumpReason = "-";
 uint32_t refuelAtMs = 0;         // 0 = дозаправка не запланована
 int      refuelTarget = 0;       // до якої сходинки дозаправити
@@ -142,6 +160,9 @@ uint8_t  warnSticky = 0;
 float vbat = 0;
 int   fuelMv = 0;
 int   fuelStep = 0;      // 1..5 після фільтра, 0 = обрив
+uint32_t fuelSeq = 0;    // номер виміру палива (росте з кожним виміром)
+uint32_t fuelLastMs = 0;
+int   fuelCand = -1, fuelCandN = 0;
 float tempC = 0;  bool tempOk = false;     // АКБ
 DeviceAddress engAddr; bool engPresent = false;
 float engT = 0;   bool engOk = false;      // двигун
@@ -180,6 +201,7 @@ const int LOG_N = 30;
 struct LogEv { uint32_t ms; char txt[112]; };
 LogEv    logBuf[LOG_N];
 int      logHead = 0, logCount = 0;
+uint32_t logTotal = 0;           // скільки подій записано від старту (сторінка тягне журнал лише при зміні)
 
 OneWire oneWire(PIN_TEMP);
 DallasTemperature sensors(&oneWire);
@@ -194,10 +216,22 @@ void pumpStop(const char* msg);
 int  fuelStepFromMv(int mv);
 void wifiStart(const char* why);
 void wifiStop(const char* why);
+void fuelSample();
 
 // ===================================================================
 //                         ВИВІД І ЖУРНАЛ
 // ===================================================================
+// обрізати незавершений UTF-8 символ у кінці (після vsnprintf у короткий буфер)
+void utf8Trim(char* s) {
+  size_t n = strlen(s);
+  if (!n) return;
+  size_t k = n - 1;
+  while (k > 0 && ((uint8_t)s[k] & 0xC0) == 0x80) k--;
+  uint8_t c = (uint8_t)s[k];
+  size_t need = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 1;
+  if (n - k < need) s[k] = 0;
+}
+
 void sayRaw(const char* s) {
   Serial.print(s);
   if (capture) *capture += s;
@@ -206,12 +240,14 @@ void say(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void say(const char* fmt, ...) {          // відповідь оператору (Serial + сторінка)
   char b[256];
   va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
+  utf8Trim(b);
   sayRaw(b); sayRaw("\n");
 }
 void logEv(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void logEv(const char* fmt, ...) {        // подія: Serial + сторінка + журнал
   char b[112];
   va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
+  utf8Trim(b);
   Serial.printf("[%lu] %s\n", (unsigned long)(millis() / 1000), b);
   if (capture) { *capture += b; *capture += "\n"; }
   LogEv& e = logBuf[logHead];
@@ -219,6 +255,7 @@ void logEv(const char* fmt, ...) {        // подія: Serial + сторінк
   strncpy(e.txt, b, sizeof(e.txt) - 1); e.txt[sizeof(e.txt) - 1] = 0;
   logHead = (logHead + 1) % LOG_N;
   if (logCount < LOG_N) logCount++;
+  logTotal++;
 }
 
 // ===================================================================
@@ -268,6 +305,14 @@ int32_t msToNight() {            // скільки мс до ночі, -1 якщ
 
 bool runningState() { return state == S_WARMUP || state == S_RUN; }
 bool linkOk() { return lastRxMs != 0 && millis() - lastRxMs < LINK_TIMEOUT_MS; }
+
+// генератор стоїть, насос не качає, сторінку ніхто не дивиться — опитуємо рідко
+bool quietIdle() {
+  if (state != S_IDLE && state != S_FAULT) return false;
+  if (pumpOn || pumpTarget) return false;
+  if (wifiOn && millis() - wifiLastClientMs < 5000) return false;
+  return true;
+}
 
 // запланована зупинка: скільки лишилось і чому
 bool planStop(uint32_t& leftMs, const char*& why) {
@@ -404,11 +449,13 @@ void pumpStop(const char* msg) {
 const char* pumpStart(int n, const char* why) {
   if (state == S_FAULT) return "FAULT";
   if (n < 2 || n > 5) return "BAD_VALUE";
+  fuelSample();                              // у простої останній вимір міг бути хвилину тому
   int raw = fuelStepFromMv(fuelMv);
   if (raw == 0) return "FUEL_SENSOR";
   if (raw >= n) return "FULL";
   pumpTarget = n; pumpReason = why;
   pumpStartMs = pumpStepMs = millis(); pumpLastStep = raw;
+  pumpSeenSeq = fuelSeq; pumpFullCnt = 0; pumpOpenCnt = 0;
   setPump(true);
   logEv("Насос: заправка до сходинки %d (%s)", n, why);
   return "";
@@ -417,14 +464,19 @@ const char* pumpStart(int n, const char* why) {
 void pumpTask() {
   if (!pumpTarget) return;
   uint32_t now = millis();
-  int raw = fuelStepFromMv(fuelMv);
-  if (raw == 0) { pumpStop("Обрив датчика палива, насос вимкнено"); return; }
-  if (raw >= pumpTarget) {
-    warnSticky &= ~W_CANISTER;
-    char b[96]; snprintf(b, sizeof(b), "Заправлено до сходинки %d, насос вимкнено", raw);
-    pumpStop(b); return;
+  if (fuelSeq != pumpSeenSeq) {              // рішення лише за новим виміром; сплеск на поплавку не зупиняє насос
+    pumpSeenSeq = fuelSeq;
+    int raw = fuelStepFromMv(fuelMv);
+    pumpOpenCnt = (raw == 0) ? pumpOpenCnt + 1 : 0;
+    pumpFullCnt = (raw >= pumpTarget) ? pumpFullCnt + 1 : 0;
+    if (pumpOpenCnt >= PUMP_CONFIRM_N) { pumpStop("Обрив датчика палива, насос вимкнено"); return; }
+    if (pumpFullCnt >= PUMP_CONFIRM_N) {
+      warnSticky &= ~W_CANISTER;
+      char b[96]; snprintf(b, sizeof(b), "Заправлено до сходинки %d, насос вимкнено", raw);
+      pumpStop(b); return;
+    }
+    if (raw > pumpLastStep) { pumpLastStep = raw; pumpStepMs = now; warnSticky &= ~W_CANISTER; }
   }
-  if (raw > pumpLastStep) { pumpLastStep = raw; pumpStepMs = now; warnSticky &= ~W_CANISTER; }
   if (now - pumpStepMs > cfgPumpStepS * 1000UL) {
     warnSticky |= W_CANISTER;
     pumpStop("Рівень не росте: у каністрі, схоже, закінчилось паливо. Насос вимкнено");
@@ -466,6 +518,7 @@ void enterFault(Fault f) {
   allOutputsSafe();
   servoMove(CHOKE_OPEN_US);
   fault = f;
+  prefs.putUChar("fault", (uint8_t)f);     // аварія переживає перезавантаження; знімається лише reset
   engineRan = false; pumpAfter = 0;        // після аварії дозаправка не планується
   logEv("АВАРІЯ: %s", FAULT_NAMES[f]);
   enterState(S_FAULT);
@@ -706,6 +759,7 @@ const char* cmdPumpAfter(int n) {
   }
   // генератор стоїть — планується одразу (з тією самою затримкою) або скасовується
   if (n == 0) { refuelCancel("pump after off"); pumpAfter = 0; return ""; }
+  fuelSample();
   if (fuelStepFromMv(fuelMv) >= n) return "FULL";
   refuelSchedule(n, cfgRefuelDlyMin * 60000UL, "pump after");
   return "";
@@ -715,6 +769,7 @@ const char* cmdReset() {
   if (state != S_FAULT) return "NOT_FAULT";
   if (ac) return "AC_PRESENT";
   fault = F_NONE; stopReason = "-"; attempts = 0; earlyStalls = 0;
+  prefs.putUChar("fault", 0);
   logEv("Аварію скинуто");
   enterState(S_IDLE);
   return "";
@@ -1075,71 +1130,96 @@ const char PAGE_HTML[] PROGMEM = R"HTML(<!doctype html><html lang="uk"><head><me
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>GEN-3000</title>
 <style>
 :root{--bg:#f2f4f1;--card:#fff;--fg:#1b2420;--mut:#5f6c66;--ln:#d9e0dc;--ac:#1f6b4f;--ok:#1f6b4f;--warn:#8a5a10;--bad:#a3352b}
-@media(prefers-color-scheme:dark){:root{--bg:#131917;--card:#1b2320;--fg:#e4ebe7;--mut:#97a39d;--ln:#2c3833;--ac:#6fc59f;--ok:#7fd1ab;--warn:#e6b766;--bad:#f0998e}}
+@media(prefers-color-scheme:dark){:root{--bg:#131917;--card:#1b2320;--fg:#e4ebe7;--mut:#97a39d;--ln:#2c3833;--ac:#2f8a66;--ok:#7fd1ab;--warn:#e6b766;--bad:#f0998e}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif;padding:12px max(12px,env(safe-area-inset-left))}
 h1{font-size:20px;margin:4px 0 10px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 8px}
 .c{background:var(--card);border:1px solid var(--ln);border-radius:10px;padding:12px;margin-bottom:12px}
 .g{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
 .k{font-size:12px;color:var(--mut)}.v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
 .st{display:inline-block;padding:3px 10px;border-radius:99px;font-weight:600;background:var(--ln)}
+.st.ok{background:var(--ok);color:var(--card)}.st.bd{background:var(--bad);color:var(--card)}
 .ok{color:var(--ok)}.wn{color:var(--warn)}.bd{color:var(--bad)}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
 button{font:inherit;padding:10px 14px;border-radius:8px;border:1px solid var(--ln);background:var(--bg);color:var(--fg);min-height:44px}
-button.p{background:var(--ac);color:#fff;border-color:var(--ac)}button.r{background:var(--bad);color:#fff;border-color:var(--bad)}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac);font-weight:600}button.r{background:#b3382c;color:#fff;border-color:#b3382c}
+button:disabled{opacity:.35}body.busy button{pointer-events:none;opacity:.6}
 input,select{font:inherit;padding:9px;border-radius:8px;border:1px solid var(--ln);background:var(--bg);color:var(--fg);min-height:44px;max-width:130px}
+.fb{display:flex;gap:3px;margin-top:5px}.fb i{flex:1;height:8px;border-radius:2px;background:var(--ln)}.fb i.on{background:var(--ok)}.fb i.w{background:var(--warn)}
 #out{white-space:pre-wrap;font:13px ui-monospace,monospace;color:var(--mut);min-height:1.4em}
 #log div{font-size:13px;border-top:1px solid var(--ln);padding:4px 0}#log span{color:var(--mut);display:inline-block;min-width:64px}
-#plan{color:var(--mut);margin-top:8px}
+#plan{color:var(--mut);margin-top:8px}#alerts div{margin-top:4px}#foot{text-align:center;margin:4px 0 16px}
 </style></head><body>
 <h1>Генератор GEN-3000 <span id="state" class="st">…</span></h1>
 <div class="c"><div class="g" id="grid"></div><div id="plan"></div><div id="alerts"></div></div>
 <div class="c"><h2>PIN</h2><div class="row"><input id="pin" type="password" inputmode="numeric" placeholder="PIN"><span class="k">потрібен для дій</span></div>
 <div id="out"></div></div>
 <div class="c"><h2>Запуск і зупинка</h2>
-<div class="row"><button class="p" onclick="cmd('start')">Старт</button><button onclick="cmd('start nochoke')">Старт без чока</button><button onclick="if(confirm('Нічний запуск?'))cmd('start dark')">Старт уночі</button></div>
-<div class="row"><button onclick="cmd('stop')">Стоп</button><button class="r" onclick="if(confirm('Негайно заглушити і вимкнути все?'))cmd('kill')">KILL</button><button onclick="cmd('reset')">Скинути аварію</button></div>
-<div class="row"><input id="work" placeholder="2:30"><button onclick="cmd('work '+v('work'))">Працювати</button><button onclick="cmd('work off')">Скасувати таймер</button></div></div>
+<div class="row"><button data-s="IDLE MANUAL" data-hi="IDLE" onclick="cmd('start')">Старт</button><button data-s="IDLE MANUAL" onclick="cmd('start nochoke')">Старт без чока</button><button data-s="IDLE MANUAL" onclick="if(confirm('Нічний запуск?'))cmd('start dark')">Старт уночі</button></div>
+<div class="row"><button data-s="PRECRANK CRANK CRANKWAIT RETRYWAIT WARMUP RUN MANUAL" data-hi="PRECRANK CRANK CRANKWAIT RETRYWAIT WARMUP RUN" onclick="cmd('stop')">Стоп</button><button class="r" onclick="if(confirm('Негайно заглушити і вимкнути все?'))cmd('kill')">KILL</button><button data-s="FAULT" data-hi="FAULT" onclick="if(confirm('Скинути аварію? Спершу переконайся, що причину усунено.'))cmd('reset')">Скинути аварію</button></div>
+<div class="row"><input id="work" placeholder="2:30"><button data-s="PRECRANK CRANK CRANKWAIT RETRYWAIT WARMUP RUN" onclick="cmd('work '+v('work'))">Працювати</button><button data-s="PRECRANK CRANK CRANKWAIT RETRYWAIT WARMUP RUN" onclick="cmd('work off')">Скасувати таймер</button></div></div>
 <div class="c"><h2>Паливо</h2>
 <div class="row"><select id="lvl"><option>5</option><option>4</option><option>3</option><option>2</option></select>
-<button onclick="cmd('pump '+v('lvl'))">Заправити зараз</button><button onclick="cmd('pump off')">Зупинити насос</button></div>
-<div class="row"><button onclick="cmd('pump after '+v('lvl'))">Дозаправити після роботи</button><button onclick="cmd('pump after off')">Не дозаправляти</button></div></div>
+<button data-x="FAULT" onclick="cmd('pump '+v('lvl'))">Заправити зараз</button><button onclick="cmd('pump off')">Зупинити насос</button></div>
+<div class="row"><button data-x="FAULT" onclick="cmd('pump after '+v('lvl'))">Дозаправити після роботи</button><button data-x="FAULT" onclick="cmd('pump after off')">Не дозаправляти</button></div></div>
 <div class="c"><h2>Сервіс</h2>
-<div class="row"><button onclick="cmd('run')">Запалювання</button><button onclick="cmd('crank 1500')">Стартер 1,5 с</button><button onclick="cmd('choke close')">Чок закрити</button><button onclick="cmd('choke open')">Чок відкрити</button></div>
-<div class="row"><button onclick="cmd('ssr on')">SSR увімк.</button><button onclick="cmd('ssr off')">SSR вимк.</button><button onclick="cmd('auto')">Вийти з ручного</button></div></div>
+<div class="row"><button data-s="IDLE MANUAL" onclick="cmd('run')">Запалювання</button><button data-s="IDLE MANUAL" onclick="cmd('crank 1500')">Стартер 1,5 с</button><button data-s="IDLE MANUAL" onclick="cmd('choke close')">Чок закрити</button><button data-s="IDLE MANUAL" onclick="cmd('choke open')">Чок відкрити</button></div>
+<div class="row"><button data-s="IDLE MANUAL" onclick="cmd('ssr on')">SSR увімк.</button><button data-s="IDLE MANUAL" onclick="cmd('ssr off')">SSR вимк.</button><button data-s="MANUAL" data-hi="MANUAL" onclick="cmd('auto')">Вийти з ручного</button></div></div>
 <div class="c"><h2>Налаштування</h2><div class="g" id="cfg"></div></div>
 <div class="c"><h2>Журнал</h2><div id="log"></div></div>
-<div class="c"><h2>Оновлення прошивки</h2><div class="row"><input type="file" id="fw" accept=".bin" style="max-width:100%"><button onclick="ota()">Завантажити</button></div><div class="k">Лише коли генератор стоїть. Файл .bin: Sketch → Export Compiled Binary.</div></div>
+<div class="c"><h2>Оновлення прошивки</h2><div class="row"><input type="file" id="fw" accept=".bin" style="max-width:100%"><button data-s="IDLE FAULT" onclick="ota()">Завантажити</button></div><div class="k">Лише коли генератор стоїть. Файл .bin: Sketch → Export Compiled Binary.</div></div>
+<div class="k" id="foot"></div>
 <script>
 const $=id=>document.getElementById(id),v=id=>$(id).value.trim();
+const esc=x=>String(x).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 try{$('pin').value=sessionStorage.getItem('pin')||''}catch(e){}
 $('pin').oninput=()=>{try{sessionStorage.setItem('pin',$('pin').value)}catch(e){}};
 const ST={IDLE:'Стоїть',PRECRANK:'Підготовка',CRANK:'Стартер',CRANKWAIT:'Чекає запуску',RETRYWAIT:'Пауза між спробами',WARMUP:'Прогрів',RUN:'Заряджає',COOLDOWN:'Охолодження',STOPPING:'Глушиться',FAULT:'АВАРІЯ',MANUAL:'Ручний режим'};
 const W={LOWFUEL:'Мало палива',CANISTER:'Каністра порожня',FUELSENSOR:'Обрив датчика палива',NOTIME:'Час невідомий (немає зв’язку з SITE)'};
 const CL={maxrun:'Макс. робота, хв',warmup:'Прогрів, с',cooldown:'Охолодження, с',pumpmax:'Насос максимум, с',pumpstep:'Каністра порожня, якщо сходинка не росте, с',refueldly:'Дозаправка після роботи, хв'};
 const hm=s=>s<0?'—':Math.floor(s/3600)+':'+String(Math.floor(s%3600/60)).padStart(2,'0');
+const has=(l,x)=>l.split(' ').includes(x);
+let logs=[],logAt=0,logN=-1,cfgJ='',busy=false,otaBusy=false,tm=null;
 function cell(k,val,cls){return '<div><div class="k">'+k+'</div><div class="v '+(cls||'')+'">'+val+'</div></div>'}
-async function load(){try{const r=await fetch('/api/status');const s=await r.json();
+function fuelBar(n){let h='<div class="fb">';for(let i=1;i<=5;i++)h+='<i class="'+(i<=n?(n<=1?'w':'on'):'')+'"></i>';return h+'</div>'}
+function gate(st){
+document.querySelectorAll('button[data-s]').forEach(b=>b.disabled=!has(b.dataset.s,st));
+document.querySelectorAll('button[data-x]').forEach(b=>b.disabled=has(b.dataset.x,st));
+document.querySelectorAll('button[data-hi]').forEach(b=>b.classList.toggle('p',has(b.dataset.hi,st)))}
+async function load(){if(otaBusy)return;try{const r=await fetch('/api/status');const s=await r.json();
 $('state').textContent=ST[s.state]||s.state;$('state').className='st '+(s.state=='FAULT'?'bd':s.state=='RUN'?'ok':'');
+gate(s.state);
 const t=x=>x===null?'—':x.toFixed(1)+' °C';
-$('grid').innerHTML=cell('230 В',s.ac?'Є':'немає',s.ac?'ok':'')+cell('АКБ стартера',s.vbat.toFixed(2)+' В',s.vbat<10.5?'bd':'')+
-cell('Паливо',s.fuel?s.fuel+'/5':'обрив',s.fuel<=1?'wn':'')+cell('t АКБ',t(s.tbat))+cell('t двигуна',t(s.teng))+
+$('grid').innerHTML=cell('230 В',s.ac?'Є':'немає',s.ac?'ok':'')+cell('АКБ стартера',s.vbat.toFixed(2)+' В',s.vbat<10.5?'bd':s.vbat<11.4?'wn':'')+
+cell('Паливо',(s.fuel?s.fuel+'/5':'обрив')+fuelBar(s.fuel),s.fuel==0?'bd':s.fuel==1?'wn':'')+cell('t АКБ',t(s.tbat))+cell('t двигуна',t(s.teng))+
 cell('Чок',s.choke)+cell('Час роботи',hm(s.run))+cell('Зв’язок SITE',s.link?'є':'немає',s.link?'':'wn')+
 cell('Реле',(s.ign?'запал. ':'')+(s.starter?'стартер ':'')+(s.ssr?'SSR ':'')+(s.pump?'насос→'+s.pumpTo:'')||'—')+cell('Період',s.day==1?'день':s.day==0?'ніч':'невідомо');
 let p=[];if(s.stopIn>=0)p.push('зупинка через '+hm(s.stopIn)+' ('+s.plan+')');
+if(s.state=='IDLE'&&s.day!=1)p.push('звичайний старт не заведе ('+(s.day==0?'ніч':'час невідомий')+'), лише «Старт уночі»');
 if(s.refuelIn>=0)p.push('дозаправка до '+s.refuelTo+' через '+Math.ceil(s.refuelIn/60)+' хв');else if(s.state=='IDLE'&&s.fuel>0&&s.fuel<5)p.push('дозаправка не запланована');
 if(s.after>0)p.push('після роботи: дозаправити до '+s.after);if(s.after<0)p.push('після роботи: не дозаправляти');
 if(s.reason!='-')p.push('остання зупинка: '+s.reason);$('plan').textContent=p.join(' · ');
 let a=(s.warn=='-'?[]:s.warn.split('+')).map(x=>'<div class="wn">'+(W[x]||x)+'</div>');
-if(s.fault!='NONE')a.unshift('<div class="bd"><b>Аварія: '+s.fault+'</b></div>');$('alerts').innerHTML=a.join('');
-if(!document.activeElement||document.activeElement.tagName!='INPUT')
-$('cfg').innerHTML=Object.entries(s.cfg).map(([k,x])=>'<div><div class="k">'+(CL[k]||k)+'</div><div class="row"><input id="c_'+k+'" value="'+x+'" style="max-width:80px"><button onclick="cmd(\'set '+k+' \'+v(\'c_'+k+'\'))">OK</button></div></div>').join('');
-const l=await (await fetch('/api/log')).json();$('log').innerHTML=l.reverse().map(e=>'<div><span>'+(e.ago<60?e.ago+' с':Math.floor(e.ago/60)+' хв')+'</span> '+e.t+'</div>').join('');
-}catch(e){$('state').textContent='немає зв’язку'}}
-async function cmd(c){$('out').textContent='…';try{const r=await fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'pin='+encodeURIComponent(v('pin'))+'&cmd='+encodeURIComponent(c)});
-$('out').textContent=await r.text()}catch(e){$('out').textContent='Помилка зв’язку'}load()}
-async function ota(){const f=$('fw').files[0];if(!f){$('out').textContent='Обери файл .bin';return}if(!confirm('Оновити прошивку? Плата перезавантажиться.'))return;
-$('out').textContent='Завантаження…';const d=new FormData();d.append('f',f);try{const r=await fetch('/update?pin='+encodeURIComponent(v('pin')),{method:'POST',body:d});$('out').textContent=await r.text()}catch(e){$('out').textContent='Помилка завантаження'}}
-load();setInterval(load,2000);
+if(s.fault!='NONE')a.unshift('<div class="bd"><b>Аварія: '+s.fault+'</b> — генератор заблоковано до «Скинути аварію»</div>');$('alerts').innerHTML=a.join('');
+const cj=JSON.stringify(s.cfg);
+if(cj!=cfgJ&&(!document.activeElement||document.activeElement.tagName!='INPUT')){cfgJ=cj;
+$('cfg').innerHTML=Object.entries(s.cfg).map(([k,x])=>'<div><div class="k">'+(CL[k]||k)+'</div><div class="row"><input id="c_'+k+'" value="'+x+'" style="max-width:80px"><button onclick="cmd(\'set '+k+' \'+v(\'c_'+k+'\'))">OK</button></div></div>').join('')}
+if(s.logN!==logN){logs=(await (await fetch('/api/log')).json()).reverse();logAt=Date.now();logN=s.logN}
+const d=Math.floor((Date.now()-logAt)/1000);
+$('log').innerHTML=logs.map(e=>{const g=e.ago+d;return '<div><span>'+(g<60?g+' с':g<3600?Math.floor(g/60)+' хв':hm(g))+'</span> '+esc(e.t)+'</div>'}).join('');
+$('foot').textContent='Прошивка '+s.fw+' · датчик палива '+s.fuelMv+' мВ · плата працює '+hm(s.up);
+}catch(e){$('state').textContent='немає зв’язку';$('state').className='st'}}
+async function cmd(c){if(busy)return;busy=true;document.body.classList.add('busy');$('out').textContent='…';
+try{const r=await fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'pin='+encodeURIComponent(v('pin'))+'&cmd='+encodeURIComponent(c)});
+$('out').textContent=await r.text()}catch(e){$('out').textContent='Помилка зв’язку'}
+busy=false;document.body.classList.remove('busy');load()}
+function ota(){const f=$('fw').files[0];if(!f){$('out').textContent='Обери файл .bin';return}if(!confirm('Оновити прошивку? Плата перезавантажиться.'))return;
+otaBusy=true;$('out').textContent='Завантаження… 0%';const d=new FormData();d.append('f',f);const x=new XMLHttpRequest();
+x.open('POST','/update?pin='+encodeURIComponent(v('pin')));
+x.upload.onprogress=e=>{if(e.lengthComputable)$('out').textContent='Завантаження… '+Math.round(e.loaded*100/e.total)+'%'};
+x.onload=()=>{$('out').textContent=x.responseText;if(x.status==200){$('out').textContent+='\nЧекаю перезапуску… якщо телефон від’єднався від GEN-3000 — підключись знову.';setTimeout(()=>{otaBusy=false;logN=-1;load()},10000)}else otaBusy=false};
+x.onerror=()=>{$('out').textContent='Помилка завантаження';otaBusy=false};x.send(d)}
+function poll(){clearInterval(tm);tm=null;if(!document.hidden){load();tm=setInterval(load,2000)}}
+document.addEventListener('visibilitychange',poll);poll();
 </script></body></html>)HTML";
 
 String jsonEsc(const char* s) {
@@ -1153,7 +1233,7 @@ String jsonEsc(const char* s) {
 }
 
 void webStatus() {
-  char b[900];
+  char b[1100];
   uint32_t left = 0; const char* why = "-";
   long stopIn = planStop(left, why) ? (long)(left / 1000) : -1;
   if (stopIn < 0) why = "-";
@@ -1166,13 +1246,14 @@ void webStatus() {
     "{\"state\":\"%s\",\"fault\":\"%s\",\"vbat\":%.2f,\"fuel\":%d,\"fuelMv\":%d,\"tbat\":%s,\"teng\":%s,"
     "\"ac\":%d,\"ign\":%d,\"starter\":%d,\"ssr\":%d,\"pump\":%d,\"pumpTo\":%d,\"choke\":\"%s\",\"run\":%lu,"
     "\"stopIn\":%ld,\"plan\":\"%s\",\"warn\":\"%s\",\"day\":%d,\"link\":%d,\"reason\":\"%s\",\"src\":\"%s\","
-    "\"refuelIn\":%ld,\"refuelTo\":%d,\"after\":%d,\"attempts\":%d,\"fw\":\"%s\","
+    "\"refuelIn\":%ld,\"refuelTo\":%d,\"after\":%d,\"attempts\":%d,\"fw\":\"%s\",\"logN\":%lu,\"up\":%lu,"
     "\"cfg\":{\"maxrun\":%lu,\"warmup\":%lu,\"cooldown\":%lu,\"pumpmax\":%lu,\"pumpstep\":%lu,\"refueldly\":%lu}}",
     STATE_NAMES[state], FAULT_NAMES[fault], vbat, fuelStep, fuelMv, tb, te,
     ac ? 1 : 0, stopOn ? 1 : 0, startOn ? 1 : 0, ssrOn ? 1 : 0, pumpOn ? 1 : 0, pumpTarget, choke,
     (unsigned long)((state == S_WARMUP || state == S_RUN || state == S_COOLDOWN) ? runSeconds() : 0),
     stopIn, why, w, dayState(), linkOk() ? 1 : 0, stopReason, runSrc,
     refuelInS(), refuelAtMs ? refuelTarget : 0, pumpAfter, attempts, FW_VERSION,
+    (unsigned long)logTotal, (unsigned long)(millis() / 1000UL),
     (unsigned long)cfgMaxRunMin, (unsigned long)cfgWarmupS, (unsigned long)cfgCooldownS,
     (unsigned long)cfgPumpMaxS, (unsigned long)cfgPumpStepS, (unsigned long)cfgRefuelDlyMin);
   server.send(200, "application/json", b);
@@ -1189,8 +1270,15 @@ void webLog() {
   server.send(200, "application/json", o);
 }
 
+uint32_t pinLockLeftS() {
+  if (!pinLockUntil) return 0;
+  int32_t r = (int32_t)(pinLockUntil - millis());
+  if (r <= 0) { pinLockUntil = 0; return 0; }
+  return ((uint32_t)r + 999) / 1000;
+}
+
 bool pinOk(const String& p) {
-  if (pinLockUntil && (int32_t)(millis() - pinLockUntil) < 0) return false;
+  if (pinLockLeftS()) return false;
   if (p == WEB_PIN) { pinFails = 0; pinLockUntil = 0; return true; }
   if (++pinFails >= 5) { pinLockUntil = millis() + 5UL * 60000UL; pinFails = 0; logEv("Сторінка: 5 невірних PIN, блок на 5 хв"); }
   return false;
@@ -1198,8 +1286,11 @@ bool pinOk(const String& p) {
 
 void webCmd() {
   if (!pinOk(server.arg("pin"))) {
-    server.send(403, "text/plain; charset=utf-8",
-                pinLockUntil ? "Невірний PIN або блокування на 5 хв" : "Невірний PIN");
+    uint32_t left = pinLockLeftS();
+    char m[96];
+    if (left) snprintf(m, sizeof(m), "PIN заблоковано ще %lu хв (5 невірних спроб)", (unsigned long)((left + 59) / 60));
+    else snprintf(m, sizeof(m), "Невірний PIN (лишилось спроб: %lu)", (unsigned long)(5 - pinFails));
+    server.send(403, "text/plain; charset=utf-8", m);
     return;
   }
   String c = server.arg("cmd");
@@ -1235,6 +1326,7 @@ void webUpdateDone() {
   if (otaOk) {
     server.send(200, "text/plain; charset=utf-8", "Прошивку оновлено. Перезавантаження…");
     logEv("Прошивку оновлено, перезавантаження");
+    prefs.putBool("wifiboot", true);         // після оновлення Wi-Fi вмикається сам, щоб перевірити версію
     delay(800);
     ESP.restart();
   } else {
@@ -1299,36 +1391,46 @@ void updateAC() {
 
 bool tempValid(float t) { return t != DEVICE_DISCONNECTED_C && t != 85.0f && t > -55.0f && t < 125.0f; }
 
-void measure() {
-  static uint32_t tLast = 0;
-  uint32_t interval = pumpOn ? 200 : 1000;
-  if (tLast != 0 && millis() - tLast < interval) return;
-  tLast = millis();
-
-  // напруга АКБ
-  uint32_t sum = 0;
-  for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(PIN_BAT);
-  vbat = (sum / 16.0f) * BAT_K / 1000.0f;
-
-  // паливо: підтяжку вмикаємо лише на час виміру
+// один вимір палива: підтяжку вмикаємо лише на час виміру
+void fuelSample() {
   digitalWrite(PIN_FUELPWR, HIGH);
   delay(10);
-  sum = 0;
+  uint32_t sum = 0;
   for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(PIN_FUEL);
   digitalWrite(PIN_FUELPWR, LOW);
   fuelMv = sum / 16;
+  fuelLastMs = millis();
+  fuelSeq++;
 
   // фільтр сходинки: зміна приймається після 3 однакових вимірів
-  static int candidate = -1, count = 0;
   int s = fuelStepFromMv(fuelMv);
-  if (s == fuelStep) { candidate = -1; count = 0; }
-  else if (s == candidate) { if (++count >= 3) { fuelStep = s; candidate = -1; count = 0; } }
-  else { candidate = s; count = 1; }
+  if (s == fuelStep) { fuelCand = -1; fuelCandN = 0; }
+  else if (s == fuelCand) { if (++fuelCandN >= 3) { fuelStep = s; fuelCand = -1; fuelCandN = 0; } }
+  else { fuelCand = s; fuelCandN = 1; }
+}
+
+void measure() {
+  uint32_t now = millis();
+  bool quiet = quietIdle();
+
+  // напруга АКБ (дільник споживає завжди, вимір нічого не коштує)
+  static uint32_t tBat = 0;
+  if (tBat == 0 || now - tBat >= 1000) {
+    tBat = now;
+    uint32_t sum = 0;
+    for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(PIN_BAT);
+    vbat = (sum / 16.0f) * BAT_K / 1000.0f;
+  }
+
+  // паливо: часто, коли качає насос; рідко в простої (рівень може змінитись лише від доливання вручну)
+  uint32_t fInt = pumpOn ? FUEL_PUMP_MS : (quiet ? FUEL_IDLE_MS : FUEL_ACTIVE_MS);
+  if (fuelLastMs == 0 || now - fuelLastMs >= fInt) fuelSample();
 
   // температура (усі датчики разом, без блокування)
   static uint32_t tReq = 0; static bool pending = false;
-  if (!pending && (tReq == 0 || millis() - tReq > 10000)) { sensors.requestTemperatures(); tReq = millis(); pending = true; }
-  if (pending && millis() - tReq > 800) {
+  uint32_t tInt = quiet ? TEMP_IDLE_MS : TEMP_ACTIVE_MS;
+  if (!pending && (tReq == 0 || now - tReq >= tInt)) { sensors.requestTemperatures(); tReq = now; pending = true; }
+  if (pending && now - tReq > TEMP_CONV_MS) {
     pending = false;
     float t = sensors.getTempC(TEMP_BAT_ADDR);
     tempOk = tempValid(t); if (tempOk) tempC = t;
@@ -1340,16 +1442,18 @@ void measure() {
 //                              SETUP / LOOP
 // ===================================================================
 void setup() {
+  setCpuFrequencyMhz(CPU_MHZ);               // до Serial1.begin: UART налаштовується вже на новій частоті
   int outs[] = { PIN_STOP, PIN_START, PIN_SSR, PIN_PUMP, PIN_SRVPWR, PIN_FUELPWR };
   for (int p : outs) { pinMode(p, OUTPUT); digitalWrite(p, LOW); }
   pinMode(PIN_DET, INPUT_PULLUP);
   pinMode(PIN_BOOTBTN, INPUT_PULLUP);
 
   Serial.begin(115200);
+  Serial.setTxTimeoutMs(0);                  // без підключеного USB вивід не гальмує loop
   Serial1.begin(9600, SERIAL_8N1, PIN_RX, PIN_TX);
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 2000) delay(10);
-  Serial.printf("Контролер генератора, прошивка %s\n", FW_VERSION);
+  Serial.printf("Контролер генератора, прошивка %s, CPU %lu МГц\n", FW_VERSION, (unsigned long)getCpuFrequencyMhz());
 
   WiFi.mode(WIFI_OFF);
   analogSetPinAttenuation(PIN_BAT, ADC_11db);
@@ -1365,7 +1469,7 @@ void setup() {
   for (int i = 0; i < cnt; i++) {
     if (sensors.getAddress(a, i) && memcmp(a, TEMP_BAT_ADDR, 8) != 0) { memcpy(engAddr, a, 8); engPresent = true; }
   }
-  sensors.setResolution(12);
+  sensors.setResolution(10);                 // 0,25 °C — досить для порогів 40 і 60 °C, конверсія вчетверо коротша
   sensors.setWaitForConversion(false);
   Serial.printf("Датчиків температури: %d. Датчик двигуна: %s\n", cnt, engPresent ? "є" : "немає (гарячий старт за таймером 20 хв)");
   if (engPresent) {
@@ -1396,7 +1500,7 @@ void setup() {
   acRaw = ac = (digitalRead(PIN_DET) == LOW);
   measure();
   fuelStep = fuelStepFromMv(fuelMv);
-  delay(1050); measure();                    // дочитати температуру
+  delay(TEMP_CONV_MS + 50); measure();       // дочитати температуру
 
   servoMove(CHOKE_OPEN_US);                  // при кожному старті чок відкритий
 
@@ -1409,14 +1513,23 @@ void setup() {
   }
 
   logEv("Старт плати, прошивка %s", FW_VERSION);
+  uint8_t sf = prefs.getUChar("fault", 0);
+  Fault savedFault = (sf > F_NONE && sf <= F_OVERTEMP) ? (Fault)sf : F_NONE;
   if (ac) {                                  // двигун працював до перезавантаження — реле вже заглушило його
     stopReason = "BOOT";
     runSrc = "-";
     runStartMs = 0;
+    pendingFault = savedFault;               // після зупинки повернутися в аварію, якщо вона була
     enterState(S_STOPPING);
+  } else if (savedFault != F_NONE) {
+    allOutputsSafe();
+    fault = savedFault;
+    logEv("Аварія %s збережена з минулого разу: для запуску потрібен reset", FAULT_NAMES[fault]);
+    enterState(S_FAULT);
   } else {
     enterState(S_IDLE);
   }
+  if (prefs.getBool("wifiboot", false)) { prefs.remove("wifiboot"); wifiStart("після оновлення прошивки"); }
   sendCfg();
   printHelp();
   printMon();
@@ -1436,6 +1549,7 @@ void loop() {
   if (refuelAtMs && (int32_t)(millis() - refuelAtMs) >= 0 && state == S_IDLE && !pumpTarget) {
     int target = refuelTarget;
     refuelAtMs = 0; refuelTarget = 0; refuelSave();
+    fuelSample();
     int raw = fuelStepFromMv(fuelMv);
     if (raw > 0 && raw < target) pumpStart(target, "POSTRUN");
     else logEv("Дозаправка не потрібна: бак %d/5", raw);
@@ -1452,4 +1566,8 @@ void loop() {
 
   static uint32_t tMon = 0;
   if (monOn && millis() - tMon > 5000) { tMon = millis(); printMon(); }
+
+  // у простої процесор спить між проходами (UART має буфер, кнопка й Wi-Fi не відчують 10 мс)
+  if (quietIdle()) delay(LOOP_IDLE_DELAY_MS);
+  else delay(1);
 }
