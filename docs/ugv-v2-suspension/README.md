@@ -231,7 +231,9 @@
 
 ![Передній вид — геометрія підвіски](front-view.svg)
 
-Файл: [`front-view.svg`](front-view.svg)
+![Вузол одного кута: мотор + кулак + важелі](corner-module.svg)
+
+Файли: [`front-view.svg`](front-view.svg), [`corner-module.svg`](corner-module.svg)
 
 ---
 
