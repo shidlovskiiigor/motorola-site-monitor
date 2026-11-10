@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" font-family="sans-serif" font-size="14">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#333"/>
+    </marker>
+    <marker id="arrRd" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#c0392b"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="720" fill="#ffffff"/>
+  <text x="600" y="32" text-anchor="middle" font-size="19" font-weight="bold">Ваша компоновка (гребінь + важелі), вид зверху на передню вісь — масштаб 0,6</text>
+
+  <!-- ================= PANEL 1: width 750, conflict ================= -->
+  <text x="600" y="68" text-anchor="middle" font-size="16" font-weight="bold" fill="#c0392b">А. Ширина 750 мм — НЕ збирається</text>
+
+  <!-- centerline -->
+  <line x1="600" y1="85" x2="600" y2="360" stroke="#bbb" stroke-width="1" stroke-dasharray="10 5"/>
+
+  <!-- spine -->
+  <rect x="570" y="95" width="60" height="260" fill="#eef3f8" stroke="#1f4e79" stroke-width="2.5"/>
+  <text x="600" y="90" text-anchor="middle" font-size="12" fill="#1f4e79">гребінь 100</text>
+
+  <!-- LEFT side: wheel x375..453, motor x421..504, shaft to 539 -->
+  <rect x="375" y="119" width="78" height="222" rx="18" fill="#c8e6c9" stroke="#1e8449" stroke-width="2.5"/>
+  <rect x="421" y="187" width="83" height="86" rx="6" fill="#a5d6a7" stroke="#1e8449" stroke-width="2"/>
+  <rect x="504" y="222" width="35" height="16" fill="#f5b7b1" stroke="#b03a2e" stroke-width="2"/>
+  <rect x="534" y="200" width="8" height="60" fill="#5dade2" stroke="#1f4e79" stroke-width="2"/>
+  <!-- RIGHT side mirrored -->
+  <rect x="747" y="119" width="78" height="222" rx="18" fill="#c8e6c9" stroke="#1e8449" stroke-width="2.5"/>
+  <rect x="696" y="187" width="83" height="86" rx="6" fill="#a5d6a7" stroke="#1e8449" stroke-width="2"/>
+  <rect x="661" y="222" width="35" height="16" fill="#f5b7b1" stroke="#b03a2e" stroke-width="2"/>
+  <rect x="658" y="200" width="8" height="60" fill="#5dade2" stroke="#1f4e79" stroke-width="2"/>
+
+  <!-- labels -->
+  <text x="414" y="113" text-anchor="middle" font-size="11" fill="#1e8449">колесо 130</text>
+  <text x="462" y="180" text-anchor="middle" font-size="11" fill="#14532d">мотор</text>
+  <text x="521" y="215" text-anchor="middle" font-size="11" fill="#b03a2e">вал 58</text>
+
+  <!-- dims: 215 from wheel edge to motor end -->
+  <line x1="375" y1="300" x2="375" y2="400" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="504" y1="276" x2="504" y2="382" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="539" y1="262" x2="539" y2="400" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="375" y1="378" x2="504" y2="378" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="440" y="373" text-anchor="middle" font-size="12">215 (ваш замір)</text>
+  <line x1="375" y1="396" x2="539" y2="396" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="455" y="412" text-anchor="middle" font-size="12">273 = 215 + вал 58</text>
+
+  <!-- the problem gap -->
+  <line x1="542" y1="230" x2="570" y2="230" stroke="#c0392b" stroke-width="3" marker-start="url(#arrRd)" marker-end="url(#arrRd)"/>
+  <text x="790" y="160" font-size="13" font-weight="bold" fill="#c0392b">на важіль лишається ~50 мм</text>
+  <text x="790" y="177" font-size="12" fill="#c0392b">(треба ~150) → поперечні важелі</text>
+  <text x="790" y="194" font-size="12" fill="#c0392b">при 750 мм не вміщаються</text>
+  <line x1="787" y1="172" x2="560" y2="225" stroke="#c0392b" stroke-width="1" marker-end="url(#arrRd)"/>
+
+  <!-- overall width dim -->
+  <line x1="375" y1="430" x2="825" y2="430" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <line x1="825" y1="345" x2="825" y2="434" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="600" y="425" text-anchor="middle" font-size="12">750</text>
+
+  <!-- ================= PANEL 2: width 900, works ================= -->
+  <text x="600" y="480" text-anchor="middle" font-size="16" font-weight="bold" fill="#1e8449">Б. Та сама схема при ширині ~900 мм — збирається</text>
+
+  <line x1="600" y1="492" x2="600" y2="690" stroke="#bbb" stroke-width="1" stroke-dasharray="10 5"/>
+  <!-- spine -->
+  <rect x="570" y="500" width="60" height="185" fill="#eef3f8" stroke="#1f4e79" stroke-width="2.5"/>
+
+  <!-- LEFT: half 270 -> outer x=330; wheel 330..408; motor 376..459; shaft to 494; upright 494 -->
+  <rect x="330" y="512" width="78" height="162" rx="18" fill="#c8e6c9" stroke="#1e8449" stroke-width="2.5"/>
+  <rect x="376" y="550" width="83" height="86" rx="6" fill="#a5d6a7" stroke="#1e8449" stroke-width="2"/>
+  <rect x="459" y="585" width="35" height="16" fill="#f5b7b1" stroke="#b03a2e" stroke-width="2"/>
+  <rect x="489" y="563" width="8" height="60" fill="#5dade2" stroke="#1f4e79" stroke-width="2"/>
+  <!-- wishbone -->
+  <g stroke="#7f8c8d" stroke-width="5" stroke-linecap="round">
+    <line x1="497" y1="593" x2="570" y2="560"/>
+    <line x1="497" y1="593" x2="570" y2="626"/>
+  </g>
+  <circle cx="497" cy="593" r="5" fill="#fff" stroke="#333" stroke-width="2"/>
+  <circle cx="570" cy="560" r="4" fill="#fff" stroke="#333" stroke-width="2"/>
+  <circle cx="570" cy="626" r="4" fill="#fff" stroke="#333" stroke-width="2"/>
+
+  <!-- RIGHT mirrored: outer edge 870; wheel 792..870; motor 741..824; shaft 706..741; upright 703 -->
+  <rect x="792" y="512" width="78" height="162" rx="18" fill="#c8e6c9" stroke="#1e8449" stroke-width="2.5"/>
+  <rect x="741" y="550" width="83" height="86" rx="6" fill="#a5d6a7" stroke="#1e8449" stroke-width="2"/>
+  <rect x="706" y="585" width="35" height="16" fill="#f5b7b1" stroke="#b03a2e" stroke-width="2"/>
+  <rect x="703" y="563" width="8" height="60" fill="#5dade2" stroke="#1f4e79" stroke-width="2"/>
+  <g stroke="#7f8c8d" stroke-width="5" stroke-linecap="round">
+    <line x1="703" y1="593" x2="630" y2="560"/>
+    <line x1="703" y1="593" x2="630" y2="626"/>
+  </g>
+  <circle cx="703" cy="593" r="5" fill="#fff" stroke="#333" stroke-width="2"/>
+  <circle cx="630" cy="560" r="4" fill="#fff" stroke="#333" stroke-width="2"/>
+  <circle cx="630" cy="626" r="4" fill="#fff" stroke="#333" stroke-width="2"/>
+
+  <text x="533" y="655" text-anchor="middle" font-size="12" fill="#1e8449" font-weight="bold">важіль ~125 мм ✓</text>
+
+  <!-- overall width dim -->
+  <line x1="330" y1="700" x2="870" y2="700" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <line x1="330" y1="678" x2="330" y2="704" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="870" y1="678" x2="870" y2="704" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="600" y="695" text-anchor="middle" font-size="12">~900 (колія 770)</text>
+</svg>
