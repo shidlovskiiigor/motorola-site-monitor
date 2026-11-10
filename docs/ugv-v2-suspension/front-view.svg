@@ -66,8 +66,8 @@
   <circle cx="635" cy="390" r="5" fill="#7d3c98"/><circle cx="580" cy="140" r="5" fill="#7d3c98"/>
 
   <!-- labels with leaders -->
-  <text x="258" y="265" fill="#b03a2e" font-size="12">Кулак (пластина 8–10 мм),</text>
-  <text x="258" y="280" fill="#b03a2e" font-size="12">вал мотора Ø33 + лиски</text>
+  <text x="258" y="265" fill="#b03a2e" font-size="12">Кулак: пластина 10 мм + бош 20–25 мм,</text>
+  <text x="258" y="280" fill="#b03a2e" font-size="12">D-отвір Ø25 під лиску нерухомого вала Ø24,8</text>
   <text x="240" y="420" fill="#1e8449" font-size="12">Важелі 150 мм, рівні, паралельні (ШС-12)</text>
   <text x="640" y="170" fill="#7d3c98" font-size="12">Койловер ATV 310–330 мм,</text>
   <text x="640" y="185" fill="#7d3c98" font-size="12">хід ≥65 мм, ~40 Н/мм</text>
