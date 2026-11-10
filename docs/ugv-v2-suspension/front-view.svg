@@ -1,98 +1,114 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600" font-family="sans-serif" font-size="14">
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="620" viewBox="0 0 1060 620" font-family="sans-serif" font-size="14">
   <defs>
     <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0,0 L8,4 L0,8 z" fill="#333"/>
     </marker>
   </defs>
-  <rect width="900" height="600" fill="#ffffff"/>
-  <text x="450" y="28" text-anchor="middle" font-size="18" font-weight="bold">UGV v2 — передній вид, подвійні поперечні важелі (масштаб 1 px = 1 мм)</text>
+  <rect width="1060" height="620" fill="#ffffff"/>
+  <text x="530" y="28" text-anchor="middle" font-size="18" font-weight="bold">UGV v2 — передній вид на вісь, ширина 900 (масштаб 1 px = 1 мм)</text>
 
   <!-- ground -->
-  <line x1="30" y1="500" x2="870" y2="500" stroke="#555" stroke-width="2"/>
-  <path d="M40,500 l-10,10 M80,500 l-10,10 M120,500 l-10,10 M160,500 l-10,10 M740,500 l-10,10 M780,500 l-10,10 M820,500 l-10,10 M860,500 l-10,10" stroke="#999" stroke-width="1"/>
+  <line x1="30" y1="500" x2="1030" y2="500" stroke="#555" stroke-width="2"/>
+  <path d="M45,500 l-10,10 M85,500 l-10,10 M125,500 l-10,10 M935,500 l-10,10 M975,500 l-10,10 M1015,500 l-10,10" stroke="#999" stroke-width="1"/>
 
-  <!-- wheels: OD 370, width 130, centers x=140 / x=760, center y=315 -->
+  <!-- wheels: OD 370, width 130, centers x=145 / x=915, center y=315 -->
   <g fill="#d9d9d9" stroke="#333" stroke-width="2">
-    <rect x="75"  y="130" width="130" height="370" rx="28"/>
-    <rect x="695" y="130" width="130" height="370" rx="28"/>
+    <rect x="80"  y="130" width="130" height="370" rx="28"/>
+    <rect x="850" y="130" width="130" height="370" rx="28"/>
   </g>
-  <circle cx="140" cy="315" r="5" fill="#333"/>
-  <circle cx="760" cy="315" r="5" fill="#333"/>
-  <text x="140" y="120" text-anchor="middle">Колесо Ø370×130</text>
+  <circle cx="145" cy="315" r="5" fill="#333"/>
+  <circle cx="915" cy="315" r="5" fill="#333"/>
+  <text x="145" y="120" text-anchor="middle">Колесо Ø370×130</text>
 
-  <!-- chassis spine 320 wide (x 290..610), y 130..300; deck 750 wide on top -->
-  <rect x="290" y="130" width="320" height="170" fill="#eef3f8" stroke="#1f4e79" stroke-width="2.5"/>
-  <text x="450" y="200" text-anchor="middle" fill="#1f4e79">Хребет рами 320×170</text>
-  <text x="450" y="222" text-anchor="middle" fill="#1f4e79" font-size="12">(АКБ + електроніка всередині)</text>
-  <rect x="75" y="104" width="750" height="24" fill="#f5e9d6" stroke="#8a6d3b" stroke-width="2"/>
-  <text x="450" y="98" text-anchor="middle" fill="#8a6d3b">Вантажний настил 750×1070 (250 кг)</text>
+  <!-- motors (rotate with wheels): body 137.5 long, O144, from x=157/..  -->
+  <g fill="#c8e6c9" stroke="#1e8449" stroke-width="2">
+    <rect x="157" y="243" width="138" height="144" rx="8"/>
+    <rect x="765" y="243" width="138" height="144" rx="8"/>
+  </g>
+  <text x="226" y="320" text-anchor="middle" font-size="12" fill="#14532d">мотор Ø144</text>
+  <!-- fixed shafts O24.8 x58 -->
+  <g fill="#f5b7b1" stroke="#b03a2e" stroke-width="2">
+    <rect x="295" y="303" width="58" height="25"/>
+    <rect x="707" y="303" width="58" height="25"/>
+  </g>
 
-  <!-- left upright + arms: BJs x=215, y=240/390; pivots x=365 -->
+  <!-- spine 100 wide (x 480..580), y 160..300; deck 900 wide on top -->
+  <rect x="480" y="160" width="100" height="140" fill="#eef3f8" stroke="#1f4e79" stroke-width="2.5"/>
+  <text x="530" y="222" text-anchor="middle" fill="#1f4e79" font-size="12">гребінь</text>
+  <text x="530" y="238" text-anchor="middle" fill="#1f4e79" font-size="12">100 мм</text>
+  <rect x="80" y="104" width="900" height="24" fill="#f5e9d6" stroke="#8a6d3b" stroke-width="2"/>
+  <text x="530" y="98" text-anchor="middle" fill="#8a6d3b">Вантажний настил 900×1070 (250 кг)</text>
+  <line x1="530" y1="128" x2="530" y2="160" stroke="#1f4e79" stroke-width="2.5"/>
+
+  <!-- left upright (clamps shaft end): plate at x=350..360, BJs at (355,240)/(355,390) -->
   <g stroke="#b03a2e" stroke-width="5" stroke-linecap="round">
-    <line x1="215" y1="240" x2="215" y2="390"/>
+    <line x1="355" y1="240" x2="355" y2="390"/>
   </g>
   <g stroke="#1e8449" stroke-width="6" stroke-linecap="round">
-    <line x1="215" y1="240" x2="365" y2="240"/>
-    <line x1="215" y1="390" x2="365" y2="390"/>
+    <line x1="355" y1="240" x2="480" y2="240"/>
+    <line x1="355" y1="390" x2="480" y2="390"/>
   </g>
   <g fill="#fff" stroke="#333" stroke-width="2">
-    <circle cx="215" cy="240" r="6"/><circle cx="215" cy="390" r="6"/>
-    <circle cx="365" cy="240" r="6"/><circle cx="365" cy="390" r="6"/>
+    <circle cx="355" cy="240" r="6"/><circle cx="355" cy="390" r="6"/>
+    <circle cx="480" cy="240" r="6"/><circle cx="480" cy="390" r="6"/>
   </g>
 
-  <!-- right upright + arms (mirror) -->
+  <!-- right upright + arms (mirror): plate x=705, arms to 580 -->
   <g stroke="#b03a2e" stroke-width="5" stroke-linecap="round">
-    <line x1="685" y1="240" x2="685" y2="390"/>
+    <line x1="705" y1="240" x2="705" y2="390"/>
   </g>
   <g stroke="#1e8449" stroke-width="6" stroke-linecap="round">
-    <line x1="685" y1="240" x2="535" y2="240"/>
-    <line x1="685" y1="390" x2="535" y2="390"/>
+    <line x1="705" y1="240" x2="580" y2="240"/>
+    <line x1="705" y1="390" x2="580" y2="390"/>
   </g>
   <g fill="#fff" stroke="#333" stroke-width="2">
-    <circle cx="685" cy="240" r="6"/><circle cx="685" cy="390" r="6"/>
-    <circle cx="535" cy="240" r="6"/><circle cx="535" cy="390" r="6"/>
+    <circle cx="705" cy="240" r="6"/><circle cx="705" cy="390" r="6"/>
+    <circle cx="580" cy="240" r="6"/><circle cx="580" cy="390" r="6"/>
   </g>
 
-  <!-- shocks: left lower mount (265,390) -> upper (320,140); right (635,390)->(580,140) -->
+  <!-- shocks: lower mount near lower BJ, upper on spine tower -->
   <g stroke="#7d3c98" stroke-width="4" fill="none">
-    <line x1="265" y1="390" x2="320" y2="140"/>
-    <line x1="635" y1="390" x2="580" y2="140"/>
+    <line x1="370" y1="385" x2="492" y2="150"/>
+    <line x1="690" y1="385" x2="568" y2="150"/>
   </g>
-  <g stroke="#7d3c98" stroke-width="2.5" fill="none">
-    <path d="M304,215 l14,4 l-16,8 l16,8 l-16,8 l16,8 l-16,8 l14,6" transform="rotate(10 300 250)"/>
-    <path d="M596,215 l-14,4 l16,8 l-16,8 l16,8 l-16,8 l16,8 l-14,6" transform="rotate(-10 600 250)"/>
-  </g>
-  <circle cx="265" cy="390" r="5" fill="#7d3c98"/><circle cx="320" cy="140" r="5" fill="#7d3c98"/>
-  <circle cx="635" cy="390" r="5" fill="#7d3c98"/><circle cx="580" cy="140" r="5" fill="#7d3c98"/>
+  <circle cx="370" cy="385" r="5" fill="#7d3c98"/><circle cx="492" cy="150" r="5" fill="#7d3c98"/>
+  <circle cx="690" cy="385" r="5" fill="#7d3c98"/><circle cx="568" cy="150" r="5" fill="#7d3c98"/>
 
-  <!-- labels with leaders -->
-  <text x="258" y="265" fill="#b03a2e" font-size="12">Кулак: пластина 10 мм + бош 20–25 мм,</text>
-  <text x="258" y="280" fill="#b03a2e" font-size="12">D-отвір Ø25 під лиску нерухомого вала Ø24,8</text>
-  <text x="240" y="420" fill="#1e8449" font-size="12">Важелі 150 мм, рівні, паралельні (ШС-12)</text>
-  <text x="640" y="170" fill="#7d3c98" font-size="12">Койловер ATV 310–330 мм,</text>
-  <text x="640" y="185" fill="#7d3c98" font-size="12">хід ≥65 мм, ~40 Н/мм</text>
+  <!-- labels -->
+  <text x="300" y="212" fill="#b03a2e" font-size="12">кулак на кінці вала</text>
+  <line x1="340" y1="217" x2="355" y2="232" stroke="#b03a2e" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="372" y="420" fill="#1e8449" font-size="12">важелі 125 мм, рівні, паралельні (ШС-12)</text>
+  <text x="700" y="170" fill="#7d3c98" font-size="12">Койловер ATV 360–400 мм,</text>
+  <text x="700" y="185" fill="#7d3c98" font-size="12">хід 90–110 мм, ~18 Н/мм,</text>
+  <text x="700" y="200" fill="#7d3c98" font-size="12">низ — біля кульової</text>
 
   <!-- vertical BJ spacing dim -->
-  <line x1="190" y1="240" x2="190" y2="390" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
-  <text x="183" y="320" text-anchor="end" font-size="12">150</text>
+  <line x1="332" y1="240" x2="332" y2="390" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="325" y="275" text-anchor="end" font-size="12">150</text>
 
   <!-- travel arrow -->
-  <line x1="760" y1="265" x2="760" y2="365" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
-  <text x="770" y="320" font-size="12">хід ±50</text>
+  <line x1="915" y1="265" x2="915" y2="365" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="925" y="320" font-size="12">хід ±50</text>
 
   <!-- clearance dim -->
-  <line x1="450" y1="300" x2="450" y2="500" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
-  <text x="458" y="420" font-size="12">кліренс ≈200</text>
+  <line x1="530" y1="300" x2="530" y2="500" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="538" y="470" font-size="12">кліренс ≈200</text>
+
+  <!-- 273 dim: outer wheel edge (80) to shaft end (353) -->
+  <line x1="80" y1="500" x2="80" y2="545" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="353" y1="330" x2="353" y2="545" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="80" y1="540" x2="353" y2="540" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="216" y="533" text-anchor="middle" font-size="12">273 (мотор 215 + вал 58)</text>
 
   <!-- track dim -->
-  <line x1="140" y1="315" x2="140" y2="535" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
-  <line x1="760" y1="315" x2="760" y2="535" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
-  <line x1="140" y1="530" x2="760" y2="530" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
-  <text x="450" y="525" text-anchor="middle" font-size="12">Колія 620</text>
+  <line x1="145" y1="315" x2="145" y2="570" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="915" y1="315" x2="915" y2="570" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="145" y1="565" x2="915" y2="565" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="530" y="558" text-anchor="middle" font-size="12">Колія 770</text>
 
   <!-- overall width dim -->
-  <line x1="75" y1="500" x2="75" y2="565" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
-  <line x1="825" y1="500" x2="825" y2="565" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
-  <line x1="75" y1="560" x2="825" y2="560" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
-  <text x="450" y="578" text-anchor="middle" font-size="12">Габаритна ширина 750</text>
+  <line x1="80" y1="555" x2="80" y2="600" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="980" y1="500" x2="980" y2="600" stroke="#aaa" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="80" y1="595" x2="980" y2="595" stroke="#333" stroke-width="1" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="530" y="613" text-anchor="middle" font-size="12">Габаритна ширина 900</text>
 </svg>
